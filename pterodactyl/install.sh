@@ -42,10 +42,28 @@ ensure_key() {
     grep -qiE "^$1([[:space:]]|$)" "$CFG" || printf '%s %s\n' "$1" "$2" >> "$CFG"
 }
 
-ensure_key port "${SERVER_PORT:-7777}"
-ensure_key maxplayers "${MAX_PLAYERS:-50}"
-ensure_key rcon_password "${RCON_PASS:-changeme}"
-ensure_key hostname "${SERVER_NAME:-SA-MP Server}"
+set_key() {
+    local clave="$1" valor="$2" linea encontrada=0
+    [ -n "$valor" ] || return 0
+    while IFS= read -r linea || [ -n "$linea" ]; do
+        case "$linea" in
+            "$clave "*|"$clave	"*|"$clave")
+                printf '%s %s\n' "$clave" "$valor"
+                encontrada=1
+                ;;
+            *) printf '%s\n' "$linea" ;;
+        esac
+    done < "$CFG" > "$CFG.tmp"
+    [ "$encontrada" = 1 ] || printf '%s %s\n' "$clave" "$valor" >> "$CFG.tmp"
+    mv "$CFG.tmp" "$CFG"
+}
+
+set_key port "${SERVER_PORT:-7777}"
+set_key maxplayers "${MAX_PLAYERS:-50}"
+set_key rcon_password "${RCON_PASS:-}"
+set_key hostname "${SERVER_NAME:-}"
+ensure_key rcon_password changeme
+ensure_key hostname "SA-MP Server"
 ensure_key announce 0
 ensure_key query 1
 
@@ -92,7 +110,8 @@ if [ "${INSTALL_VOICE:-1}" = "1" ] || [ "${INSTALL_VOICE:-1}" = "true" ]; then
     [ -f "$SERVER/filterscripts/voice.amx" ] || install -m 644 sv/filterscripts/voice.amx "$SERVER/filterscripts/voice.amx"
     [ -f "$SERVER/filterscripts/voice.pwn" ] || install -m 644 sv/filterscripts/voice.pwn "$SERVER/filterscripts/voice.pwn"
 
-    ensure_key sv_port "${SV_PORT:-}"
+    set_key sv_port "${SV_PORT:-}"
+    ensure_key sv_port ""
 
     if grep -qiE "^plugins([[:space:]]|$)" "$CFG"; then
         if grep -qiE "^plugins.*sampvoice[^.]" "$CFG" && ! grep -qiE "^plugins.*sampvoice\.so" "$CFG"; then
