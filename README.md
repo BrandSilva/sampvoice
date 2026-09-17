@@ -37,8 +37,22 @@ Instrucciones completas para el dueño del servidor: `sampvoice-port/LEEME.md` d
 ## Egg de Pterodactyl
 
 `egg-samp.json` instala SA-MP 0.3.7-R2-1 y este módulo sobre la imagen estándar `ghcr.io/parkervcp/games:samp`.
-Variables: `SV_PORT` (el puerto de voz), `INSTALL_VOICE`, `VOICE_FILTERSCRIPT` y `SVPORT_VERSION`. La instalación es
-idempotente: no pisa `server.cfg`, gamemodes ni filterscripts que ya existan.
+La instalación es **idempotente**: no pisa `server.cfg`, gamemodes ni filterscripts que ya existan, así que una
+reinstalación no borra el trabajo del cliente.
+
+| Variable | Para qué |
+|---|---|
+| `SV_PORT` | Puerto de la voz (la allocation extra). Vacío = sin puerto fijo |
+| `INSTALL_VOICE` | 0 deja un SA-MP normal, sin voz |
+| `VOICE_FILTERSCRIPT` | 0 si tu gamemode ya gestiona la voz |
+| `SVPORT_VERSION` | Versión del módulo (`latest` o `vX.Y.Z`) |
+| `STOP_TIMEOUT` | Segundos antes de forzar el cierre al apagar |
+| `INSTALL_MYSQL` | 1 instala el plugin MySQL R41-4 si falta |
+
+**Apagado sin quedarse colgado.** El egg arranca con `pterodactyl/start.sh`, que pasa la señal de cierre a
+samp03svr y, si no termina en `STOP_TIMEOUT` segundos, lo cierra a la fuerza y limpia los `samp-npc` que queden.
+Sin esto, un SA-MP con muchos plugins puede no terminar nunca de apagarse y hay que pulsar "Kill" en el panel:
+reproducido con FCNPC, PawnPlus, YSF y Pawn.RakNet cargados.
 
 ## Cómo funciona
 

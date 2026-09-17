@@ -27,6 +27,8 @@ El binario oficial va incrustado con `.incbin`, se escribe a un `memfd` y se abr
 | `filterscripts/voice.pwn` | Filterscript de ejemplo (B = local, Z = global) |
 | `include/sampvoice.inc` | Include oficial de la 3.1 |
 | `egg-samp.json` | Egg de Pterodactyl (imagen `ghcr.io/parkervcp/games:samp`) |
+| `pterodactyl/install.sh` | Script de instalación del egg (el JSON lo lleva incrustado) |
+| `pterodactyl/start.sh` | Arranque con plazo de apagado: sin él, un SA-MP con muchos plugins no termina de apagarse |
 
 ## Reglas
 
@@ -47,3 +49,6 @@ Compilar no basta. Antes de publicar una versión, en un servidor de laboratorio
 3. Con un jugador y el cliente oficial 3.1: que la tecla de voz active el micrófono y que lleguen paquetes de audio
    al puerto (`tcpdump -n "udp port <sv_port>"`, se ven paquetes de ~300 bytes a ~10/s mientras habla).
 4. Casos de fallo: puerto ocupado y `sv_port` ausente. En los dos el servidor debe arrancar igual, avisando en el log.
+5. Apagado: parar desde el panel con plugins pesados cargados (FCNPC, PawnPlus, YSF) y comprobar que el contenedor
+   sale solo, sin pulsar Kill. Ojo al probar fuera de Docker: bash **ignora SIGINT** en procesos lanzados con `&`,
+   así que la trampa de `start.sh` no se instala y parece que no funciona; hay que probarlo en un contenedor.
