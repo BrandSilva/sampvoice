@@ -19,7 +19,7 @@ If the hook fails, the entrypoint falls back to a `socat` TCP+UDP proxy.
 ## Docker Image
 
 ```
-ghcr.io/tridentsky/samp:latest
+ghcr.io/brandsilva/samp:latest
 ```
 
 ## Quick Start

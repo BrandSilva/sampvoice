@@ -10,7 +10,7 @@
     "description": "SA-MP 0.3.7 server with optional UDP voice proxy for SampVoice. The proxy automatically detects internal voice ports and forwards them to the panel-assigned port.",
     "features": null,
     "docker_images": {
-        "SA-MP": "ghcr.io/tridentsky/samp:latest"
+        "SA-MP": "ghcr.io/brandsilva/samp:latest"
     },
     "file_denylist": [],
     "startup": "bash /entrypoint.sh",
