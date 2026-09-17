@@ -1,2 +1,8 @@
 *.sh text eol=lf
-Dockerfile text eol=lf
+*.c text eol=lf
+*.pwn text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.inc -text
+*.amx binary
+*.so binary

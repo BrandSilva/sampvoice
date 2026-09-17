@@ -1,67 +1,49 @@
 # CLAUDE.md
 
-## Project Overview
+## Qué es este repo
 
-Docker image + Pterodactyl egg for SA-MP servers with SampVoice support. Solves the random UDP voice port problem using a 32-bit LD_PRELOAD hook that forces SampVoice to bind to the panel-assigned port.
+`sampvoice.so` para SA-MP 0.3.7-R2 en Linux que envuelve el binario **oficial de SampVoice 3.1** (MIT, de CyberMor)
+y le añade dos cosas, sin modificarlo:
 
-## Architecture
+- **Puerto de voz fijo**: parchea la GOT del binario oficial para `bind()`, de modo que su socket UDP (que la 3.1 liga
+  al puerto 0) quede en el puerto de `sv_port` de `server.cfg` o de la variable `SV_PORT`. El cliente recibe ese
+  puerto porque la 3.1 anuncia lo que devuelve `getsockname()`.
+- **Compatibilidad con Pawn.RakNet**: parchea también `mprotect()`. La 3.1 deja en solo lectura la página de
+  `GetRakServerInterface` de samp03svr tras enganchar; Pawn.RakNet escribe ahí después y el servidor muere con
+  SIGSEGV. El parche mantiene la página escribible, como hacía SampVoice 3.0.
 
-```
-Pterodactyl assigns:  port 7778 (game)  +  port 7070 (voice)
-                              |                    |
-                     Container starts      LD_PRELOAD loads
-                     SA:MP on 7778         voicefix.so (i386)
-                              |                    |
-                     SampVoice calls       Hook intercepts:
-                     bind(port=0)          bind(port=7070) instead
-                              |                    |
-                     SampVoice announces   Client connects to
-                     port 7070 via RakNet  server_ip:7070 ✓
-```
+El binario oficial va incrustado con `.incbin`, se escribe a un `memfd` y se abre con `dlopen`.
 
-## Why LD_PRELOAD (not socat proxy)
+## Estructura
 
-SampVoice v3.1 hardcodes `bind(port=0)` AND announces the bound port to clients via RakNet `ServerInfoPacket`. A socat proxy on 7070→random_port doesn't help because the CLIENT is told to connect to the random port (not 7070). The hook forces SampVoice to bind to the correct port, so the announcement is also correct.
+| Ruta | Qué es |
+|---|---|
+| `plugin/svport.c` | Todo el módulo |
+| `plugin/test_config.c`, `plugin/test.sh` | Pruebas del lector de `server.cfg` (CRLF, BOM, líneas largas, `sv_port` = `port`, `SV_PORT`, `bind`…) |
+| `plugin/build.sh` | Compila dentro del contenedor i386 |
+| `scripts/build.sh` | Orquesta todo: dependencias, pruebas, compilación, paquete |
+| `scripts/fetch-deps.sh` | Descarga y verifica por sha256 el núcleo 3.1, el compilador Pawn y los includes de SA-MP |
+| `scripts/package.sh` | Arma `dist/sampvoice-port.zip` y las notas de la release |
+| `filterscripts/voice.pwn` | Filterscript de ejemplo (B = local, Z = global) |
+| `include/sampvoice.inc` | Include oficial de la 3.1 |
+| `egg-samp.json` | Egg de Pterodactyl (imagen `ghcr.io/parkervcp/games:samp`) |
 
-## File Structure
+## Reglas
 
-- **`docker/Dockerfile`** — Multi-stage build: i386/debian compiles voicefix.so, parkervcp/games:samp runs SA:MP
-- **`docker/voicefix.c`** — LD_PRELOAD hook that intercepts bind() for UDP port 0
-- **`docker/entrypoint.sh`** — Sets LD_PRELOAD, starts SA:MP, monitors voice port, socat fallback
-- **`egg-samp.json`** — Pterodactyl egg with VOICE_PORT variable
-- **`.github/workflows/docker-publish.yml`** — Builds and pushes image to GHCR
+1. **Nunca añadir comentarios al código.**
+2. La compilación va en `i386/ubuntu:18.04` a propósito: así el binario solo exige GLIBC_2.4 y sirve en hostings
+   viejos. No compilar contra glibc nuevas.
+3. Toda dependencia descargada se verifica por sha256 antes de usarla.
+4. `SVPORT_VERSION` en `plugin/svport.c` manda: `scripts/package.sh` falla si la etiqueta `vX.Y.Z` no coincide.
+5. El egg no debe pisar archivos del cliente: instala solo lo que falta.
+6. Commits como `Brando Silva <tridentskycompany@gmail.com>`.
 
-## How the Hook Works
+## Probar de verdad
 
-1. `voicefix.c` is compiled as a native i386 shared library (multi-stage Docker build)
-2. Entrypoint sets `SV_VOICE_PORT=7070` and `LD_PRELOAD=/usr/lib/voicefix.so`
-3. SA:MP server starts (32-bit ELF), dynamic linker loads voicefix.so
-4. When SampVoice calls `bind(SOCK_DGRAM, INADDR_ANY, port=0)`, hook redirects to port 7070
-5. Hook disables itself after first redirect (`unsetenv`) to avoid affecting other sockets
-6. SampVoice's `getsockname()` returns 7070, announces 7070 to clients
-7. If hook fails, entrypoint falls back to socat proxy
+Compilar no basta. Antes de publicar una versión, en un servidor de laboratorio:
 
-## Key Constraints
-
-- Do not add comments to source code files
-- Docker image must be compatible with Pterodactyl/Pelican panel conventions
-- The `container` user (UID 1000) is standard for Pterodactyl
-- Voice port must be allocated as a secondary port in the Pterodactyl panel
-- voicefix.so MUST be compiled as 32-bit (i386) to match samp03svr
-- SA:MP server is always a 32-bit Linux ELF binary
-
-## Build and Test
-
-```bash
-cd docker
-docker build -t samp:latest .
-docker run -e SERVER_PORT=7777 -e VOICE_PORT=7070 -p 7777:7777/udp -p 7070:7070/udp samp:latest
-```
-
-## Deployment
-
-1. Push to GitHub to trigger the Docker image build via GitHub Actions
-2. Import `egg-samp.json` into Pterodactyl panel
-3. Update the `docker_images` field in the egg with the actual GHCR path
-4. Create a server, allocate primary port (game) + secondary port (voice)
-5. Set the VOICE_PORT variable to match the secondary allocation
+1. Arrancar con Pawn.RakNet cargado, en los dos órdenes (antes y después de `sampvoice.so`): no debe caerse.
+2. Comprobar en el log `voice socket bound to 0.0.0.0:<sv_port>/udp` y `voice server running on port <sv_port>`.
+3. Con un jugador y el cliente oficial 3.1: que la tecla de voz active el micrófono y que lleguen paquetes de audio
+   al puerto (`tcpdump -n "udp port <sv_port>"`, se ven paquetes de ~300 bytes a ~10/s mientras habla).
+4. Casos de fallo: puerto ocupado y `sv_port` ausente. En los dos el servidor debe arrancar igual, avisando en el log.

@@ -1,103 +1,91 @@
-# SA-MP Docker Image for Pterodactyl
+# sampvoice-port — SampVoice 3.1 con puerto de voz fijo
 
-Custom Docker image for SA-MP 0.3.7 servers on Pterodactyl/Pelican panels with built-in voice port fix for SampVoice.
+Módulo para servidores **SA-MP 0.3.7-R2 en Linux** que hace dos cosas que el SampVoice oficial no hace:
 
-## The Problem
+1. **La voz sale por el puerto que tú decidas** (`sv_port` en `server.cfg`), no por uno aleatorio. Con eso funciona
+   en cualquier hosting con Pterodactyl/Wings: basta una allocation extra, sin tocar nada del nodo.
+2. **Convive con Pawn.RakNet.** SampVoice 3.1 tumba el servidor al arrancar si Pawn.RakNet está cargado; este
+   módulo lo evita.
 
-SampVoice v3.1 hardcodes `bind(port=0)` — the OS picks a random UDP port for voice traffic. In containerized environments, only panel-allocated ports are exposed, so the random port is unreachable. Additionally, SampVoice announces this random port to clients via RakNet `ServerInfoPacket`, so clients try to connect to a port that isn't exposed.
+Los jugadores no cambian nada: usan el **cliente oficial de SampVoice 3.1** (SA-MP 0.3.7-R1 o R3).
 
-## The Solution
+## Instalación rápida
 
-A 32-bit `LD_PRELOAD` hook (`voicefix.so`) intercepts the `bind()` syscall. When SampVoice tries to bind a UDP socket to port 0, the hook forces it to the panel-assigned voice port instead. This means:
+1. Descarga `sampvoice-port.zip` de [Releases](https://github.com/BrandSilva/sampvoice/releases) y descomprímelo
+   en la carpeta del servidor.
+2. En `server.cfg`:
+   ```
+   sv_port 3000
+   filterscripts voice
+   plugins sampvoice.so
+   ```
+   `sv_port` es el puerto UDP de la voz y **tiene que ser distinto del `port` del juego**. En Pterodactyl, añade una
+   allocation al servidor y pon aquí ese número.
+3. Arranca. En el log debe salir:
+   ```
+   [svport] voice port set to 3000/udp from server.cfg
+   [svport] voice socket bound to 0.0.0.0:3000/udp
+   [sv:dbg:network:bind] : voice server running on port 3000
+   ```
 
-1. SampVoice binds directly to the allocated port (e.g., 7070)
-2. SampVoice announces the correct port to clients via RakNet
-3. Clients connect to the exposed port — voice works
+El filterscript de ejemplo (`voice.amx`) da **B** para hablar cerca y **Z** para hablar a todos. **Cárgalo el primero**
+en `filterscripts`: si otro filterscript devuelve 0 en `OnPlayerConnect`, los que van detrás no reciben el evento y la
+voz no se activa nunca. Si tu gamemode ya gestiona la voz, no uses el de ejemplo.
 
-If the hook fails, the entrypoint falls back to a `socat` TCP+UDP proxy.
+Instrucciones completas para el dueño del servidor: `sampvoice-port/LEEME.md` dentro del zip.
 
-## Docker Image
+## Egg de Pterodactyl
 
-```
-ghcr.io/brandsilva/samp:latest
-```
+`egg-samp.json` instala SA-MP 0.3.7-R2-1 y este módulo sobre la imagen estándar `ghcr.io/parkervcp/games:samp`.
+Variables: `SV_PORT` (el puerto de voz), `INSTALL_VOICE`, `VOICE_FILTERSCRIPT` y `SVPORT_VERSION`. La instalación es
+idempotente: no pisa `server.cfg`, gamemodes ni filterscripts que ya existan.
 
-## Quick Start
+## Cómo funciona
 
-1. Import `egg-samp.json` into your Pterodactyl panel
-2. Create a server with a primary port (game) and secondary port (voice)
-3. Set `VOICE_PORT` to match the secondary allocation
-4. Start the server
+`sampvoice.so` de este repo es un envoltorio que lleva dentro el binario **oficial** de SampVoice 3.1 (MIT, de
+[CyberMor](https://github.com/CyberMor/sampvoice)) sin modificar. Al cargarse:
 
-## Server Variables
+1. Escribe el binario oficial en un `memfd` (si no puede, en un temporal) y lo abre con `dlopen`.
+2. Redirige en su GOT dos funciones:
+   - **`bind`** — SampVoice 3.1 liga su socket UDP al puerto 0, y luego anuncia al cliente el puerto que le dio el
+     sistema (`getsockname`). El módulo lo liga al puerto de `sv_port`, así que el cliente recibe ese puerto.
+   - **`mprotect`** — SampVoice 3.1 engancha `GetRakServerInterface` de samp03svr y deja esa página de código como
+     solo lectura. Pawn.RakNet escribe después en la misma página dando por hecho que sigue escribible, y el
+     servidor muere con SIGSEGV. El módulo mantiene la página escribible, que es como se comporta SampVoice 3.0.
+3. Reenvía `Supports`, `Load`, `Unload`, `AmxLoad`, `AmxUnload` y `ProcessTick` al binario oficial.
 
-| Variable | Default | Description |
-|---|---|---|
-| `VOICE_PROXY` | `1` | Enable/disable voice fix (1/0) |
-| `VOICE_PORT` | `7070` | UDP voice port (must match panel allocation) |
-| `SAMPVOICE_URL` | `none` | URL to download SampVoice plugin |
-| `INSTALL_MYSQL` | `0` | Auto-install MySQL plugin (1/0) |
-| `SERVER_NAME` | `My SA-MP Server` | Server name |
-| `RCON_PASS` | `changeme` | RCON password |
-| `MAX_PLAYERS` | `50` | Max players |
+Si el puerto está ocupado o no se configuró, el módulo avisa en el log y deja que la voz use un puerto aleatorio: el
+servidor nunca se queda sin arrancar por esto.
 
-## Architecture
+## Opciones
 
-```
-Container starts
-      |
-      v
-LD_PRELOAD loads voicefix.so (32-bit hook)
-      |
-      v
-SA-MP server starts, loads sampvoice.so plugin
-      |
-      v
-SampVoice calls bind(INADDR_ANY, port=0)
-      |
-      v
-Hook intercepts: bind(INADDR_ANY, port=VOICE_PORT) instead
-      |
-      v
-SampVoice announces VOICE_PORT to clients via RakNet
-      |
-      v
-Clients connect to server_ip:VOICE_PORT (exposed by panel)
-```
+| `server.cfg` | Uso |
+|---|---|
+| `sv_port <puerto>` | Puerto UDP de la voz (1-65535, distinto de `port`) |
+| `bind <IPv4>` | Si el servidor usa una IP concreta, la voz escucha en esa misma IP |
 
-## How It Works
+Si `server.cfg` no trae `sv_port`, se usa la variable de entorno `SV_PORT`.
 
-SampVoice v3.1 (`Network::Bind()`) always binds to port 0:
-```cpp
-bindAddr.sin_port = NULL;  // OS picks random port
-```
+## Compilar
 
-The `voicefix.so` hook (compiled as i386 ELF to match SA-MP's 32-bit binary) overrides this:
-```c
-// When UDP socket binds to port 0, redirect to SV_VOICE_PORT
-if (sin->sin_port == 0 && type == SOCK_DGRAM) {
-    modified.sin_port = htons(VOICE_PORT);
-    return real_bind(sockfd, &modified, addrlen);
-}
-```
-
-After one successful redirect, the hook disables itself (`unsetenv`) to avoid affecting other sockets.
-
-## Building
+Necesitas Docker (la compilación va en un contenedor i386 con glibc antigua, para que el binario sirva en cualquier
+hosting: solo exige GLIBC_2.4).
 
 ```bash
-cd docker
-docker build -t samp:latest .
+./scripts/build.sh     # descarga dependencias, pasa las pruebas, compila y arma dist/sampvoice-port.zip
 ```
 
-The Dockerfile uses a multi-stage build: an `i386/debian` stage compiles `voicefix.so` as a native 32-bit library, then copies it into the final image.
+Las dependencias que descarga (SampVoice 3.1 oficial, compilador Pawn e includes de SA-MP) se verifican por sha256.
 
-Push to GHCR happens automatically via GitHub Actions on changes to `docker/`.
+## Límites
 
-## Credits
+- Solo **SA-MP 0.3.7-R2 en Linux** (probado con R2-1 y R2-2-1). No funciona en open.mp ni en 0.3DL: es una
+  limitación del propio SampVoice, que engancha direcciones fijas del servidor.
+- Solo UDP/IPv4.
+- Los clientes 3.1 y 4.x no son compatibles entre sí; este módulo es de la rama 3.1.
 
-Built with [Claude Code](https://claude.ai/code) by Anthropic.
+## Licencias
 
-## License
-
-MIT
+- Este módulo: MIT (`LICENSE`).
+- SampVoice © 2019 Mor (CyberMor), MIT (`LICENSE-sampvoice`). El binario oficial se redistribuye dentro del módulo
+  sin modificarlo.

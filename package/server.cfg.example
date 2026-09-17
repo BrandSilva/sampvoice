@@ -1,0 +1,4 @@
+port 7777
+sv_port 3000
+filterscripts voice
+plugins sampvoice.so
