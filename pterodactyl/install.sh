@@ -142,6 +142,11 @@ cat > "$SERVER/start.sh" <<'STARTSH'
 cd /home/container || exit 1
 
 STOP_TIMEOUT="${STOP_TIMEOUT:-30}"
+case "$STOP_TIMEOUT" in
+    ""|*[!0-9]*) STOP_TIMEOUT=30 ;;
+esac
+[ "$STOP_TIMEOUT" -lt 5 ] && STOP_TIMEOUT=5
+[ "$STOP_TIMEOUT" -gt 300 ] && STOP_TIMEOUT=300
 
 matar_npcs() {
     for dir in /proc/[0-9]*; do
