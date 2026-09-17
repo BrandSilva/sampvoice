@@ -1,6 +1,4 @@
 #!/bin/bash
-# SA-MP TridentSky Edition + SampVoice 3.1 con puerto fijo
-# Instalacion idempotente: nunca pisa archivos que ya existan en el servidor.
 set -euo pipefail
 
 SERVER=/mnt/server
@@ -11,14 +9,14 @@ SAMP_SHA256="f8ead0b15683fc34f13a7a84ba9ea7252b17c5e3161d8255364e1abedd697a53"
 MYSQL_URL="https://github.com/pBlueG/SA-MP-MySQL/releases/download/R41-4/mysql-R41-4-Debian-static.tar.gz"
 MYSQL_SHA256="2e24aabfb7d674a454961e341a7df219f65069d273c44d4323e5199a59f135be"
 
-echo "[1/5] Dependencias"
+echo "[1/5] Dependencies"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates unzip tar file >/dev/null
 
 mkdir -p "$SERVER"
 cd /tmp
 
-echo "[2/5] Servidor SA-MP 0.3.7-R2"
+echo "[2/5] SA-MP 0.3.7-R2 server"
 if [ ! -f "$SERVER/samp03svr" ]; then
     curl -fsSL --retry 3 --connect-timeout 20 -o samp.tar.gz "$SAMP_URL"
     echo "$SAMP_SHA256  samp.tar.gz" | sha256sum -c -
@@ -29,9 +27,9 @@ if [ ! -f "$SERVER/samp03svr" ]; then
         [ -e "$SERVER/$dir" ] || cp -r "samp/$dir" "$SERVER/$dir"
     done
     [ -f "$CFG" ] || cp samp/server.cfg "$CFG"
-    echo "  servidor instalado"
+    echo "  server installed"
 else
-    echo "  ya existe samp03svr, no se toca"
+    echo "  samp03svr already present, keeping it"
     [ -f "$CFG" ] || printf 'echo Executing Server Config...\n' > "$CFG"
 fi
 
@@ -43,18 +41,18 @@ ensure_key() {
 }
 
 set_key() {
-    local clave="$1" valor="$2" linea encontrada=0
-    [ -n "$valor" ] || return 0
-    while IFS= read -r linea || [ -n "$linea" ]; do
-        case "$linea" in
-            "$clave "*|"$clave	"*|"$clave")
-                printf '%s %s\n' "$clave" "$valor"
-                encontrada=1
+    local key="$1" value="$2" line found=0
+    [ -n "$value" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "$key "*|"$key	"*|"$key")
+                printf '%s %s\n' "$key" "$value"
+                found=1
                 ;;
-            *) printf '%s\n' "$linea" ;;
+            *) printf '%s\n' "$line" ;;
         esac
     done < "$CFG" > "$CFG.tmp"
-    [ "$encontrada" = 1 ] || printf '%s %s\n' "$clave" "$valor" >> "$CFG.tmp"
+    [ "$found" = 1 ] || printf '%s %s\n' "$key" "$value" >> "$CFG.tmp"
     mv "$CFG.tmp" "$CFG"
 }
 
@@ -67,10 +65,10 @@ ensure_key hostname "SA-MP Server"
 ensure_key announce 0
 ensure_key query 1
 
-echo "[3/5] Plugin MySQL"
+echo "[3/5] MySQL plugin"
 if [ "${INSTALL_MYSQL:-0}" = "1" ] || [ "${INSTALL_MYSQL:-0}" = "true" ]; then
     if [ -f "$SERVER/plugins/mysql.so" ]; then
-        echo "  ya existe mysql.so, no se toca"
+        echo "  mysql.so already present, keeping it"
     elif curl -fsSL --retry 3 --connect-timeout 20 -o mysql.tar.gz "$MYSQL_URL" && echo "$MYSQL_SHA256  mysql.tar.gz" | sha256sum -c -; then
         rm -rf mysqlplugin && mkdir -p mysqlplugin
         tar -xzf mysql.tar.gz -C mysqlplugin
@@ -80,18 +78,18 @@ if [ "${INSTALL_MYSQL:-0}" = "1" ] || [ "${INSTALL_MYSQL:-0}" = "true" ]; then
             mkdir -p "$SERVER/plugins"
             install -m 644 "$SO" "$SERVER/plugins/mysql.so"
             [ -n "$LOGCORE" ] && install -m 644 "$LOGCORE" "$SERVER/log-core.so"
-            echo "  mysql.so instalado"
+            echo "  mysql.so installed"
         else
-            echo "  aviso: no se encontro mysql.so en el paquete"
+            echo "  warning: no mysql.so inside the package"
         fi
     else
-        echo "  aviso: no se pudo descargar el plugin MySQL"
+        echo "  warning: could not download the MySQL plugin"
     fi
 else
-    echo "  omitido"
+    echo "  skipped"
 fi
 
-echo "[4/5] SampVoice 3.1 con puerto fijo"
+echo "[4/5] SampVoice 3.1 with a fixed voice port"
 if [ "${INSTALL_VOICE:-1}" = "1" ] || [ "${INSTALL_VOICE:-1}" = "true" ]; then
     TAG="${SVPORT_VERSION:-latest}"
     if [ "$TAG" = "latest" ]; then
@@ -131,12 +129,12 @@ if [ "${INSTALL_VOICE:-1}" = "1" ] || [ "${INSTALL_VOICE:-1}" = "true" ]; then
             echo "filterscripts voice" >> "$CFG"
         fi
     fi
-    echo "  modulo de voz instalado (sv_port = ${SV_PORT:-sin asignar})"
+    echo "  voice module installed (sv_port = ${SV_PORT:-not set})"
 else
-    echo "  omitido"
+    echo "  skipped"
 fi
 
-echo "[5/5] Arranque controlado y permisos"
+echo "[5/5] Startup wrapper and permissions"
 cat > "$SERVER/start.sh" <<'STARTSH'
 #!/bin/bash
 cd /home/container || exit 1
@@ -148,7 +146,7 @@ esac
 [ "$STOP_TIMEOUT" -lt 5 ] && STOP_TIMEOUT=5
 [ "$STOP_TIMEOUT" -gt 300 ] && STOP_TIMEOUT=300
 
-matar_npcs() {
+kill_npcs() {
     for dir in /proc/[0-9]*; do
         [ -r "$dir/comm" ] || continue
         if [ "$(cat "$dir/comm" 2>/dev/null)" = "samp-npc" ]; then
@@ -160,7 +158,7 @@ matar_npcs() {
 ./samp03svr &
 SAMP_PID=$!
 
-apagar() {
+shutdown_server() {
     trap '' INT TERM
     kill -INT "$SAMP_PID" 2>/dev/null
     for _ in $(seq 1 "$STOP_TIMEOUT"); do
@@ -168,27 +166,27 @@ apagar() {
         sleep 1
     done
     if kill -0 "$SAMP_PID" 2>/dev/null; then
-        echo "[start] samp03svr no respondio en ${STOP_TIMEOUT}s: se fuerza el cierre"
+        echo "[start] samp03svr did not stop within ${STOP_TIMEOUT}s, forcing shutdown"
         kill -KILL "$SAMP_PID" 2>/dev/null
     fi
-    matar_npcs
+    kill_npcs
     wait "$SAMP_PID" 2>/dev/null
     exit 0
 }
 
-trap apagar INT TERM
+trap shutdown_server INT TERM
 
 wait "$SAMP_PID"
 CODE=$?
-matar_npcs
+kill_npcs
 if [ "$CODE" -gt 128 ]; then
-    echo "[start] samp03svr termino por la senal $(( CODE - 128 ))"
+    echo "[start] samp03svr exited on signal $(( CODE - 128 ))"
 fi
 exit "$CODE"
 STARTSH
 chmod 755 "$SERVER/start.sh"
 
-echo "  start.sh escrito"
+echo "  start.sh written"
 chown -R root:root "$SERVER"
 grep -iE "^(port|sv_port|plugins|filterscripts|maxplayers|hostname)" "$CFG" || true
-echo "Instalacion terminada"
+echo "Installation finished"

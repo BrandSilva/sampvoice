@@ -8,7 +8,7 @@ esac
 [ "$STOP_TIMEOUT" -lt 5 ] && STOP_TIMEOUT=5
 [ "$STOP_TIMEOUT" -gt 300 ] && STOP_TIMEOUT=300
 
-matar_npcs() {
+kill_npcs() {
     for dir in /proc/[0-9]*; do
         [ -r "$dir/comm" ] || continue
         if [ "$(cat "$dir/comm" 2>/dev/null)" = "samp-npc" ]; then
@@ -20,7 +20,7 @@ matar_npcs() {
 ./samp03svr &
 SAMP_PID=$!
 
-apagar() {
+shutdown_server() {
     trap '' INT TERM
     kill -INT "$SAMP_PID" 2>/dev/null
     for _ in $(seq 1 "$STOP_TIMEOUT"); do
@@ -28,20 +28,20 @@ apagar() {
         sleep 1
     done
     if kill -0 "$SAMP_PID" 2>/dev/null; then
-        echo "[start] samp03svr no respondio en ${STOP_TIMEOUT}s: se fuerza el cierre"
+        echo "[start] samp03svr did not stop within ${STOP_TIMEOUT}s, forcing shutdown"
         kill -KILL "$SAMP_PID" 2>/dev/null
     fi
-    matar_npcs
+    kill_npcs
     wait "$SAMP_PID" 2>/dev/null
     exit 0
 }
 
-trap apagar INT TERM
+trap shutdown_server INT TERM
 
 wait "$SAMP_PID"
 CODE=$?
-matar_npcs
+kill_npcs
 if [ "$CODE" -gt 128 ]; then
-    echo "[start] samp03svr termino por la senal $(( CODE - 128 ))"
+    echo "[start] samp03svr exited on signal $(( CODE - 128 ))"
 fi
 exit "$CODE"
